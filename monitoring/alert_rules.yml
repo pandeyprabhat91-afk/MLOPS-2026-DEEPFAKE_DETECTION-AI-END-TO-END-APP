@@ -1,0 +1,377 @@
+groups:
+
+  # ─── INFRASTRUCTURE: CPU ───────────────────────────────────────────────────
+  - name: cpu_alerts
+    rules:
+      - alert: CPUHighUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 75
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU usage above 75%"
+          description: "Instance {{ $labels.instance }} CPU at {{ $value | printf \"%.1f\" }}%"
+
+      - alert: CPUCriticalUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CPU usage above 90% — system under heavy load"
+          description: "Instance {{ $labels.instance }} CPU at {{ $value | printf \"%.1f\" }}%"
+
+      - alert: CPUSustainedLoad
+        expr: node_load15 / count(node_cpu_seconds_total{mode="idle"}) without(cpu, mode) > 1.5
+        for: 10m
+        labels:
+          severity: error
+        annotations:
+          summary: "15-minute load average > 1.5x CPU count for 10 minutes"
+          description: "Load average: {{ $value | printf \"%.2f\" }}"
+
+  # ─── INFRASTRUCTURE: MEMORY ────────────────────────────────────────────────
+  - name: memory_alerts
+    rules:
+      - alert: MemoryUsageHigh
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory usage above 80%"
+          description: "Instance {{ $labels.instance }} memory at {{ $value | printf \"%.1f\" }}%"
+
+      - alert: MemoryUsageCritical
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Memory usage above 95% — OOM kill risk"
+          description: "Instance {{ $labels.instance }} memory at {{ $value | printf \"%.1f\" }}%"
+
+      - alert: SwapUsageHigh
+        expr: |
+          (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) / node_memory_SwapTotal_bytes * 100 > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Swap usage above 50% — memory pressure"
+          description: "Swap at {{ $value | printf \"%.1f\" }}%"
+
+  # ─── INFRASTRUCTURE: DISK ──────────────────────────────────────────────────
+  - name: disk_alerts
+    rules:
+      - alert: DiskSpaceWarning
+        expr: |
+          (node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} - node_filesystem_free_bytes{fstype!~"tmpfs|overlay"})
+          / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} * 100 > 75
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk usage above 75%"
+          description: "{{ $labels.mountpoint }} at {{ $value | printf \"%.1f\" }}% on {{ $labels.instance }}"
+
+      - alert: DiskSpaceCritical
+        expr: |
+          (node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} - node_filesystem_free_bytes{fstype!~"tmpfs|overlay"})
+          / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} * 100 > 90
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk usage above 90% — fill imminent"
+          description: "{{ $labels.mountpoint }} at {{ $value | printf \"%.1f\" }}% on {{ $labels.instance }}"
+
+      - alert: DiskIOHigh
+        expr: rate(node_disk_io_time_seconds_total[5m]) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk I/O utilization above 80%"
+          description: "Device {{ $labels.device }} at {{ $value | printf \"%.1f\" }}%"
+
+      - alert: DiskFillRateFast
+        expr: |
+          predict_linear(node_filesystem_free_bytes{fstype!~"tmpfs|overlay"}[1h], 4 * 3600) < 0
+        for: 5m
+        labels:
+          severity: error
+        annotations:
+          summary: "Disk will fill in < 4 hours at current write rate"
+          description: "{{ $labels.mountpoint }} on {{ $labels.instance }}"
+
+  # ─── INFRASTRUCTURE: NETWORK ───────────────────────────────────────────────
+  - name: network_alerts
+    rules:
+      - alert: NetworkHighInbound
+        expr: rate(node_network_receive_bytes_total{device!="lo"}[5m]) / 1024 / 1024 > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Network inbound > 100 MB/s"
+          description: "Interface {{ $labels.device }}: {{ $value | printf \"%.1f\" }} MB/s inbound"
+
+      - alert: NetworkHighOutbound
+        expr: rate(node_network_transmit_bytes_total{device!="lo"}[5m]) / 1024 / 1024 > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Network outbound > 100 MB/s"
+          description: "Interface {{ $labels.device }}: {{ $value | printf \"%.1f\" }} MB/s outbound"
+
+      - alert: NetworkErrors
+        expr: rate(node_network_receive_errs_total[5m]) + rate(node_network_transmit_errs_total[5m]) > 10
+        for: 3m
+        labels:
+          severity: error
+        annotations:
+          summary: "Network errors detected on {{ $labels.device }}"
+          description: "Error rate: {{ $value | printf \"%.1f\" }}/s"
+
+  # ─── MODEL / GPU MEMORY ────────────────────────────────────────────────────
+  - name: gpu_model_alerts
+    rules:
+      - alert: ModelMemoryHigh
+        expr: deepfake_model_memory_mb > 3000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Model GPU/RAM memory above 3 GB"
+          description: "Model memory: {{ $value | printf \"%.0f\" }} MB"
+
+      - alert: ModelMemoryCritical
+        expr: deepfake_model_memory_mb > 5000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Model memory above 5 GB — OOM kill risk"
+          description: "Model memory: {{ $value | printf \"%.0f\" }} MB"
+
+      - alert: ModelMemoryLeaking
+        expr: increase(deepfake_model_memory_mb[30m]) > 500
+        for: 5m
+        labels:
+          severity: error
+        annotations:
+          summary: "Model memory grew > 500 MB in 30 minutes — possible leak"
+          description: "30m increase: {{ $value | printf \"%.0f\" }} MB"
+
+      - alert: ModelReloadFrequent
+        expr: increase(deepfake_model_reloads_total[1h]) > 3
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Model reloaded > 3 times in last hour"
+          description: "Reload count: {{ $value }}"
+
+  # ─── APPLICATION: ERRORS & AVAILABILITY ────────────────────────────────────
+  - name: app_error_alerts
+    rules:
+      - alert: BackendDown
+        expr: up{job="backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DeepScan backend is DOWN"
+          description: "FastAPI backend not reachable for 1 minute"
+
+      - alert: HighErrorRate
+        expr: |
+          rate(deepfake_requests_total{status="500"}[5m]) /
+          rate(deepfake_requests_total[5m]) > 0.05
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error rate > 5% for 3 minutes"
+          description: "Backend error rate: {{ $value | humanizePercentage }}"
+
+      - alert: ModerateErrorRate
+        expr: |
+          rate(deepfake_requests_total{status="500"}[5m]) /
+          rate(deepfake_requests_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Error rate > 1% for 5 minutes"
+          description: "Backend error rate: {{ $value | humanizePercentage }}"
+
+      - alert: ActiveRequestsSpiking
+        expr: deepfake_active_requests > 50
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 50 concurrent active requests"
+          description: "Active requests: {{ $value }}"
+
+      - alert: RequestRateDrop
+        expr: |
+          rate(deepfake_requests_total[10m]) < 0.1
+          and rate(deepfake_requests_total[10m] offset 30m) > 1
+        for: 5m
+        labels:
+          severity: error
+        annotations:
+          summary: "Request rate dropped > 90% — possible service issue"
+          description: "Current rate: {{ $value | printf \"%.3f\" }} req/s"
+
+  # ─── APPLICATION: INFERENCE LATENCY ────────────────────────────────────────
+  - name: latency_alerts
+    rules:
+      - alert: InferenceLatencyHigh
+        expr: |
+          histogram_quantile(0.95, rate(deepfake_inference_latency_ms_bucket[5m])) > 200
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 inference latency > 200ms"
+          description: "P95 latency: {{ $value | printf \"%.0f\" }}ms"
+
+      - alert: InferenceLatencyCritical
+        expr: |
+          histogram_quantile(0.95, rate(deepfake_inference_latency_ms_bucket[5m])) > 1000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "P95 inference latency > 1 second"
+          description: "P95 latency: {{ $value | printf \"%.0f\" }}ms"
+
+      - alert: PreprocessingLatencyHigh
+        expr: |
+          histogram_quantile(0.95, rate(deepfake_preprocessing_latency_ms_bucket[5m])) > 500
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 preprocessing latency > 500ms"
+          description: "P95 preprocessing: {{ $value | printf \"%.0f\" }}ms"
+
+      - alert: RequestLatencyHigh
+        expr: |
+          histogram_quantile(0.99, rate(deepfake_request_latency_seconds_bucket[5m])) > 5
+        for: 3m
+        labels:
+          severity: error
+        annotations:
+          summary: "P99 end-to-end request latency > 5 seconds"
+          description: "P99 latency: {{ $value | printf \"%.2f\" }}s"
+
+  # ─── ML: DRIFT & MODEL QUALITY ─────────────────────────────────────────────
+  - name: ml_quality_alerts
+    rules:
+      - alert: FeatureDriftWarning
+        expr: deepfake_drift_score > 2.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Feature drift score above 2.0 — monitor closely"
+          description: "Drift score: {{ $value | printf \"%.2f\" }}"
+
+      - alert: FeatureDriftCritical
+        expr: deepfake_drift_score > 3.0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Feature drift detected — retraining required"
+          description: "Drift score: {{ $value | printf \"%.2f\" }}"
+
+      - alert: LowConfidenceScores
+        expr: |
+          histogram_quantile(0.5, rate(deepfake_confidence_score_bucket[10m])) < 0.55
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Median confidence score below 55% — model uncertain"
+          description: "Median confidence: {{ $value | humanizePercentage }}"
+
+      - alert: FakeRateSpiking
+        expr: |
+          rate(deepfake_predictions_total{label="fake"}[10m]) /
+          rate(deepfake_predictions_total[10m]) > 0.9
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Over 90% of predictions are FAKE — possible data quality issue"
+          description: "Fake rate: {{ $value | humanizePercentage }}"
+
+      - alert: BulkQueueBacklog
+        expr: deepfake_bulk_queue_depth > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bulk job queue depth > 20"
+          description: "Queue depth: {{ $value }}"
+
+      - alert: BulkQueueCritical
+        expr: deepfake_bulk_queue_depth > 100
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bulk job queue depth > 100 — processing severely backed up"
+          description: "Queue depth: {{ $value }}"
+
+  # ─── PIPELINE ──────────────────────────────────────────────────────────────
+  - name: pipeline_alerts
+    rules:
+      - alert: PipelineValidationFailure
+        expr: increase(pipeline_validation_failures_total[1h]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Data pipeline schema validation failure"
+          description: "Failures in last hour: {{ $value }}"
+
+      - alert: AirflowDown
+        expr: up{job="airflow"} == 0
+        for: 3m
+        labels:
+          severity: error
+        annotations:
+          summary: "Airflow webserver unreachable"
+          description: "Airflow has been down for 3 minutes"
+
+  # ─── PROMETHEUS SELF-MONITORING ─────────────────────────────────────────────
+  - name: prometheus_alerts
+    rules:
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 3m
+        labels:
+          severity: error
+        annotations:
+          summary: "Prometheus target {{ $labels.job }} is DOWN"
+          description: "Target {{ $labels.instance }} has been down for 3 minutes"
+
+      - alert: PrometheusStorageHigh
+        expr: |
+          prometheus_tsdb_storage_blocks_bytes / 1024 / 1024 / 1024 > 0.4
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "Prometheus storage above 400 MB (512 MB limit)"
+          description: "Storage: {{ $value | printf \"%.2f\" }} GB"
